@@ -260,10 +260,12 @@ def criar_grafico_receita_clientes(df):
     fig.update_layout(
         title="Receita & Clientes - Evolução Temporal",
         xaxis=dict(title="Mês", showgrid=True, gridwidth=1, gridcolor="rgba(31, 41, 55, 0.5)"),
-        yaxis=dict(title="Receita (R$)", titlefont=dict(color="#3B82F6"), tickfont=dict(color="#3B82F6")),
+        yaxis=dict(
+            title=dict(text="Receita (R$)", font=dict(color="#3B82F6")),
+            tickfont=dict(color="#3B82F6")
+        ),
         yaxis2=dict(
-            title="Clientes",
-            titlefont=dict(color="#10B981"),
+            title=dict(text="Clientes", font=dict(color="#10B981")),
             tickfont=dict(color="#10B981"),
             overlaying="y",
             side="right",
