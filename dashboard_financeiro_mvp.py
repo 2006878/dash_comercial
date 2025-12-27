@@ -59,12 +59,12 @@ st.subheader("📋 Dados Financeiros")
 
 with st.expander("📄 Tabela Interativa de Entrada", expanded=True):
     base_df = pd.DataFrame({
-        "Data": pd.date_range("2024-01-01", periods=6, freq="MS"),
-        "Receita": [None]*6,
-        "Despesa": [None]*6,
-        "Retirada": [None]*6,
-        "Clientes_Atendidos": [None]*6,
-        "Clientes_Fechados": [None]*6,
+        "Data": pd.date_range("2025-01-01", periods=12, freq="MS"),
+        "Receita": [None]*12,
+        "Despesa": [None]*12,
+        "Retirada": [None]*12,
+        "Clientes_Atendidos": [None]*12,
+        "Clientes_Fechados": [None]*12,
     })
 
     df_input = st.data_editor(
