@@ -2,55 +2,114 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import re
 
 # =====================================================
-# CONFIGURAÇÃO
+# CONFIGURAÇÃO DA PÁGINA
 # =====================================================
 st.set_page_config(page_title="Análise Financeira Estratégica", layout="wide")
 
-st.title("📊 Análise Financeira Estratégica")
-st.caption("Diagnóstico financeiro orientado à decisão executiva")
+# =====================================================
+# WHITE-LABEL
+# =====================================================
+st.sidebar.header("🧩 White-label")
+
+logo_cliente = st.sidebar.file_uploader(
+    "Logo do Cliente", type=["png", "jpg", "jpeg"]
+)
+
+cor_primaria = st.sidebar.color_picker("Cor primária", "#1f77b4")
+cor_secundaria = st.sidebar.color_picker("Cor secundária", "#ff7f0e")
+
+# =====================================================
+# HEADER
+# =====================================================
+col_logo, col_title = st.columns([1, 5])
+
+with col_logo:
+    if logo_cliente:
+        st.image(logo_cliente, width=210)
+
+with col_title:
+    st.title("📊 Análise Financeira Estratégica")
+    st.caption("Diagnóstico financeiro e operacional orientado à decisão executiva.")
 
 # =====================================================
 # FUNÇÕES
 # =====================================================
-def plot_line_zero(df, x, y, title, y_label):
-    fig = px.line(df, x=x, y=y, markers=True)
+def plot_line_zero(df, x, y, title, y_label, color):
+    fig = px.line(
+        df,
+        x=x,
+        y=y,
+        markers=True,
+        color_discrete_sequence=[color],
+        title=title
+    )
     fig.add_hline(y=0, line_dash="dash", line_color="gray")
     fig.update_layout(
-        title=title,
-        title_x=0.5,
-        height=280,
+        height=260,
         margin=dict(l=30, r=30, t=40, b=30),
         xaxis_title=None,
-        yaxis_title=y_label
+        yaxis_title=y_label,
+        title_x=0.5
     )
     return fig
 
 
-def calcular_score(resultado_medio, margem, cv):
-    score = 100
-    if resultado_medio < 0:
-        score -= 40
-    if margem < 10:
-        score -= 20
+def calcular_score(resultado, margem, cv):
+    if resultado > 0 and margem >= 20 and cv < 0.5:
+        return "A"
+    if resultado > 0 and margem >= 10 and cv < 1:
+        return "B"
+    if resultado > 0:
+        return "C"
+    return "D"
+
+
+def classificar_negocio(resultado, crescimento, cv):
+    if resultado > 0 and crescimento > 0 and cv < 1:
+        return "Em crescimento Saudável"
+    if resultado > 0 and crescimento > 0 and cv >= 1:
+        return "Em crescimento Instável"
+    return "Em risco"
+
+
+def gerar_narrativa(resultado, margem, cv, crescimento, delta):
+    narrativa = []
+
+    if resultado > 0:
+        narrativa.append("O negócio apresenta resultado líquido médio positivo, indicando viabilidade financeira.")
+    else:
+        narrativa.append("O negócio opera com resultado líquido médio negativo, indicando fragilidade financeira.")
+
+    if margem >= 20:
+        narrativa.append("As margens são elevadas, refletindo alta eficiência operacional.")
+    elif margem >= 10:
+        narrativa.append("As margens são moderadas, com espaço para otimização.")
+    else:
+        narrativa.append("As margens são baixas, pressionando a rentabilidade.")
+
     if cv > 1:
-        score -= 20
-    return max(score, 0)
+        narrativa.append("Existe alta volatilidade nos resultados, reduzindo previsibilidade de caixa.")
+    else:
+        narrativa.append("Os resultados são relativamente estáveis ao longo do tempo.")
 
+    if crescimento > 0:
+        narrativa.append("O desempenho recente supera a média histórica, indicando tendência positiva.")
+    else:
+        narrativa.append("O desempenho recente está abaixo da média histórica, indicando desaceleração.")
 
-def classificar(score):
-    if score >= 80:
-        return "Excelente"
-    if score >= 60:
-        return "Saudável"
-    if score >= 40:
-        return "Atenção"
-    return "Crítico"
+    if delta <= -30:
+        narrativa.append(
+            "O último mês apresentou desempenho significativamente inferior ao melhor período histórico, "
+            "indicando possível sazonalidade negativa ou ruptura pontual."
+        )
+
+    return narrativa
+
 
 # =====================================================
-# INPUT
+# INPUT — TABELA FLEXÍVEL
 # =====================================================
 st.subheader("📋 Dados Financeiros")
 
@@ -65,7 +124,7 @@ with st.expander("📄 Tabela interativa (adicione quantos meses quiser)", expan
     df_input = st.data_editor(
         base_df,
         num_rows="dynamic",
-        width='stretch',
+        use_container_width=True,
         column_config={
             "Data": st.column_config.DateColumn("Mês", format="MM/YYYY"),
             "Receita": st.column_config.NumberColumn("Receita", format="R$ %.2f"),
@@ -74,7 +133,11 @@ with st.expander("📄 Tabela interativa (adicione quantos meses quiser)", expan
         }
     )
 
+# =====================================================
+# VALIDAÇÃO
+# =====================================================
 df = df_input.dropna().copy()
+
 if df.empty:
     st.info("Preencha ao menos um mês completo.")
     st.stop()
@@ -85,149 +148,109 @@ df = df.sort_values("Data")
 # =====================================================
 # CÁLCULOS
 # =====================================================
-df["Resultado"] = df["Receita"] - df["Despesa"] - df["Retirada"]
-df["Margem_%"] = (df["Resultado"] / df["Receita"]) * 100
+df["Resultado_liquido"] = df["Receita"] - df["Despesa"] - df["Retirada"]
+df["Margem_liquida_%"] = (df["Resultado_liquido"] / df["Receita"]) * 100
+df["Eficiencia_custo_%"] = ((df["Despesa"] + df["Retirada"]) / df["Receita"]) * 100
 
-media = df["Resultado"].mean()
-vol = df["Resultado"].std()
-cv = vol / abs(media) if media != 0 else np.inf
-
-df["Media_hist"] = df["Resultado"].expanding().mean().shift(1)
-df["Crescimento_%"] = (df["Resultado"] - df["Media_hist"]) / df["Media_hist"].abs() * 100
-
-# =====================================================
-# SCORE
-# =====================================================
-score = calcular_score(media, df["Margem_%"].mean(), cv)
-status = classificar(score)
+df["Media_historica"] = df["Resultado_liquido"].expanding().mean().shift(1)
+df["Crescimento_vs_media_%"] = (
+    (df["Resultado_liquido"] - df["Media_historica"]) /
+    df["Media_historica"].abs()
+) * 100
 
 # =====================================================
-# KPIs
+# MÉTRICAS GLOBAIS
 # =====================================================
-st.subheader("🎯 Visão Executiva")
+resultado_medio = df["Resultado_liquido"].mean()
+margem_media = df["Margem_liquida_%"].mean()
+crescimento_medio = df["Crescimento_vs_media_%"].mean()
+volatilidade = df["Resultado_liquido"].std(ddof=1)
+coef_var = (
+    volatilidade / abs(resultado_medio)
+    if abs(resultado_medio) > 1e-6
+    else np.inf
+)
+
+score = calcular_score(resultado_medio, margem_media, coef_var)
+classificacao = classificar_negocio(resultado_medio, crescimento_medio, coef_var)
+
+melhor_mes = df.loc[df["Resultado_liquido"].idxmax()]
+ultimo_mes = df.iloc[-1]
+delta_melhor = (
+    (ultimo_mes["Resultado_liquido"] - melhor_mes["Resultado_liquido"]) /
+    abs(melhor_mes["Resultado_liquido"])
+) * 100
+
+# =====================================================
+# KPIs — SCORE VISUAL
+# =====================================================
+st.subheader("📌 Diagnóstico Executivo")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Resultado Médio", f"R$ {media:,.2f}")
-c2.metric("Margem Média", f"{df['Margem_%'].mean():.1f}%")
-c3.metric("Volatilidade (CV)", f"{cv:.2f}")
-c4.metric("Score Financeiro", f"{score} / 100")
-
-st.progress(score / 100)
-
-st.markdown(f"**Status Geral:** `{status}`")
+c1.metric("Resultado Médio", f"R$ {resultado_medio:,.2f}")
+c2.metric("Margem Média", f"{margem_media:.1f}%")
+c3.metric("Score Financeiro", score)
+c4.metric("Classificação", classificacao)
 
 # =====================================================
-# DIAGNÓSTICO
+# GRÁFICOS (MESMA PROPORÇÃO)
 # =====================================================
-st.subheader("🧠 Diagnóstico Automático")
-
-diagnosticos = []
-
-if media < 0:
-    diagnosticos.append("O negócio opera com prejuízo médio, indicando inviabilidade financeira atual.")
-elif df["Margem_%"].mean() < 10:
-    diagnosticos.append("O negócio é viável, porém opera com margens muito apertadas.")
-else:
-    diagnosticos.append("O negócio é financeiramente viável e lucrativo.")
-
-if cv > 1:
-    diagnosticos.append("Alta instabilidade nos resultados indica dependência de picos ou contratos pontuais.")
-
-if df["Crescimento_%"].mean() > 0 and cv > 1:
-    diagnosticos.append("O crescimento recente não é estrutural e carece de previsibilidade.")
-
-for d in diagnosticos:
-    st.markdown(f"- {d}")
-
-# =====================================================
-# RECOMENDAÇÕES
-# =====================================================
-st.subheader("🚀 Recomendações Acionáveis")
-
-recs = []
-
-if df["Margem_%"].mean() < 10:
-    recs.append("Reavaliar precificação e estrutura de custos imediatamente.")
-
-if cv > 1:
-    recs.append("Buscar contratos recorrentes para reduzir volatilidade.")
-
-if score >= 80:
-    recs.append("Avaliar expansão controlada ou reinvestimento estratégico.")
-
-for r in recs:
-    st.markdown(f"- {r}")
-
-# =====================================================
-# GRÁFICOS – EVIDÊNCIAS VISUAIS (COMPACTOS)
-# =====================================================
-st.subheader("📈 Evidências Visuais")
-
-g1, g2 = st.columns(2)
+g1, g2, g3 = st.columns(3)
 
 with g1:
     st.plotly_chart(
-        plot_line_zero(
-            df,
-            "Data",
-            "Resultado",
-            "Resultado Líquido",
-            "R$"
-        ),
-        width='stretch'
+        plot_line_zero(df, "Data", "Resultado_liquido", "Resultado Líquido", "R$", cor_primaria),
+        use_container_width=True
     )
 
 with g2:
-    fig_margem = px.line(
+    fig = px.line(
         df,
         x="Data",
-        y="Margem_%",
+        y=["Margem_liquida_%", "Eficiencia_custo_%"],
         markers=True,
-        title="Margem Líquida (%)"
+        color_discrete_sequence=[cor_primaria, cor_secundaria]
     )
-    fig_margem.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig_margem.update_layout(
-        height=280,
-        margin=dict(l=30, r=30, t=40, b=30),
-        xaxis_title=None,
-        yaxis_title="%"
-    )
-    st.plotly_chart(fig_margem, width='stretch')
-
-g3, g4 = st.columns(2)
+    fig.update_layout(height=260, margin=dict(l=30, r=30, t=40, b=30), title="Margem & Eficiência")
+    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+    st.plotly_chart(fig, use_container_width=True)
 
 with g3:
     st.plotly_chart(
-        plot_line_zero(
-            df,
-            "Data",
-            "Crescimento_%",
-            "Crescimento vs Média Histórica",
-            "%"
-        ),
-        width='stretch'
+        plot_line_zero(df, "Data", "Crescimento_vs_media_%", "Crescimento vs Média", "%", cor_secundaria),
+        use_container_width=True
     )
 
-with g4:
-    df["Custo_Total"] = df["Despesa"] + df["Retirada"]
+# =====================================================
+# NARRATIVA EXECUTIVA AUTOMÁTICA
+# =====================================================
+st.subheader("🧠 Insights Executivos")
 
-    fig_fluxo = px.line(
-        df,
-        x="Data",
-        y=["Receita", "Custo_Total"],
-        markers=True,
-        title="Receita vs Custos"
-    )
-    fig_fluxo.update_layout(
-        height=280,
-        margin=dict(l=30, r=30, t=40, b=30),
-        xaxis_title=None,
-        yaxis_title="R$"
-    )
-    st.plotly_chart(fig_fluxo, width='stretch')
+narrativa = gerar_narrativa(
+    resultado_medio,
+    margem_media,
+    coef_var,
+    crescimento_medio,
+    delta_melhor
+)
+
+for n in narrativa:
+    st.markdown(f"- {n}")
+
+# =====================================================
+# RECOMENDAÇÕES ACIONÁVEIS
+# =====================================================
+st.subheader("🎯 Recomendações Estratégicas")
+
+if classificacao == "Em crescimento Estável":
+    st.success("Invista em escala, previsibilidade comercial e retenção de clientes.")
+elif classificacao == "Em crescimento Instável":
+    st.info("Priorize redução de volatilidade e ganho de eficiência operacional.")
+else:
+    st.error("Recomenda-se revisão imediata do modelo de custos e estratégia comercial.")
 
 # =====================================================
 # TABELA FINAL
 # =====================================================
 with st.expander("📄 Tabela Analítica Final"):
-    st.dataframe(df, width='stretch')
+    st.dataframe(df, use_container_width=True)
