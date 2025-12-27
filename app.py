@@ -218,17 +218,18 @@ c3.metric("Score Financeiro", score)
 c4.metric("Classificação", classificacao)
 
 # =====================================================
-# GRÁFICOS (MESMA PROPORÇÃO)
+# GRÁFICOS (MESMA PROPORÇÃO / RESPONSIVO)
 # =====================================================
-g1, g2, g3 = st.columns(3)
+# Detectar largura da tela para layout responsivo
+width = st.query_params.get("width", [1200])[0]  # valor padrão 1200 se não existir
+is_mobile = int(width) < 768  # largura menor que 768px considera mobile
 
-with g1:
+if is_mobile:
+    # Layout vertical para mobile
     st.plotly_chart(
         plot_line_zero(df, "Data", "Resultado_liquido", "Resultado Líquido", "R$", cor_primaria),
         use_container_width=True
     )
-
-with g2:
     fig = px.line(
         df,
         x="Data",
@@ -239,12 +240,38 @@ with g2:
     fig.update_layout(height=260, margin=dict(l=30, r=30, t=40, b=30), title="Margem & Eficiência")
     fig.add_hline(y=0, line_dash="dash", line_color="gray")
     st.plotly_chart(fig, use_container_width=True)
-
-with g3:
     st.plotly_chart(
         plot_line_zero(df, "Data", "Crescimento_vs_media_%", "Crescimento vs Média", "%", cor_secundaria),
         use_container_width=True
     )
+else:
+    # Layout em colunas para desktop
+    g1, g2, g3 = st.columns(3)
+
+    with g1:
+        st.plotly_chart(
+            plot_line_zero(df, "Data", "Resultado_liquido", "Resultado Líquido", "R$", cor_primaria),
+            use_container_width=True
+        )
+
+    with g2:
+        fig = px.line(
+            df,
+            x="Data",
+            y=["Margem_liquida_%", "Eficiencia_custo_%"],
+            markers=True,
+            color_discrete_sequence=[cor_primaria, cor_secundaria]
+        )
+        fig.update_layout(height=260, margin=dict(l=30, r=30, t=40, b=30), title="Margem & Eficiência")
+        fig.add_hline(y=0, line_dash="dash", line_color="gray")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with g3:
+        st.plotly_chart(
+            plot_line_zero(df, "Data", "Crescimento_vs_media_%", "Crescimento vs Média", "%", cor_secundaria),
+            use_container_width=True
+        )
+
 
 # =====================================================
 # NARRATIVA EXECUTIVA AUTOMÁTICA
