@@ -68,7 +68,7 @@ def calcular_score(resultado, margem, cv):
 
 def classificar_negocio(resultado, crescimento, cv):
     if resultado > 0 and crescimento > 0 and cv < 1:
-        return "Em crescimento Saudável"
+        return "Em crescimento Estável"
     if resultado > 0 and crescimento > 0 and cv >= 1:
         return "Em crescimento Instável"
     return "Em risco"
@@ -113,6 +113,27 @@ def gerar_narrativa(resultado, margem, cv, crescimento, delta):
 # =====================================================
 st.subheader("📋 Dados Financeiros")
 
+# Dados de exemplo
+dados_exemplo = {
+    "Data": pd.to_datetime([
+        "2025-01-01", "2025-02-01", "2025-03-10", "2025-04-10", 
+        "2025-05-10", "2025-06-10", "2025-07-10", "2025-08-10", 
+        "2025-09-10", "2025-10-01", "2025-11-01", "2025-12-01"
+    ]),
+    "Receita": [
+        104137.4, 71692, 84789.75, 44190, 111825, 45300, 
+        220710, 92706, 48720, 130645, 42825, 35900
+    ],
+    "Despesa": [
+        65058.1, 43327.94, 42225.81, 51129.23, 69061.25, 43198.2, 
+        38486.11, 67828.6, 89751.58, 49556.35, 26998.41, 18529.37
+    ],
+    "Retirada": [
+        5153, 4951.25, 2244.01, 3861.25, 2589.11, 565.78, 
+        1733.91, 1632.5, 1910.38, 4601.28, 1093.33, 1083.06
+    ]
+}
+
 with st.expander("📄 Tabela interativa (adicione quantos meses quiser)", expanded=True):
     base_df = pd.DataFrame({
         "Data": pd.date_range("2025-01-01", periods=12, freq="MS"),
@@ -121,17 +142,21 @@ with st.expander("📄 Tabela interativa (adicione quantos meses quiser)", expan
         "Retirada": [None]*12,
     })
 
-    df_input = st.data_editor(
-        base_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "Data": st.column_config.DateColumn("Mês", format="MM/YYYY"),
-            "Receita": st.column_config.NumberColumn("Receita", format="R$ %.2f"),
-            "Despesa": st.column_config.NumberColumn("Despesa", format="R$ %.2f"),
-            "Retirada": st.column_config.NumberColumn("Retirada", format="R$ %.2f"),
-        }
-    )
+    # Botão para carregar dados de exemplo
+    if st.button("⚡ Carregar dados de exemplo"):
+        df_input = pd.DataFrame(dados_exemplo)
+    else:
+        df_input = st.data_editor(
+            base_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "Data": st.column_config.DateColumn("Mês", format="MM/YYYY"),
+                "Receita": st.column_config.NumberColumn("Receita", format="R$ %.2f"),
+                "Despesa": st.column_config.NumberColumn("Despesa", format="R$ %.2f"),
+                "Retirada": st.column_config.NumberColumn("Retirada", format="R$ %.2f"),
+            }
+        )
 
 # =====================================================
 # VALIDAÇÃO
@@ -254,3 +279,14 @@ else:
 # =====================================================
 with st.expander("📄 Tabela Analítica Final"):
     st.dataframe(df, use_container_width=True)
+
+# Footer
+st.markdown("""
+    <hr style='border:1px solid #e3e3e3;margin-top:40px'>
+    <div style='text-align: center;'>
+        Desenvolvido por 
+        <a href='https://www.linkedin.com/in/tairone-amaral/' target='_blank'>
+            Tairone Amaral
+        </a>
+    </div>
+""", unsafe_allow_html=True)
