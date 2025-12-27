@@ -70,7 +70,7 @@ with st.expander("📄 Tabela Interativa de Entrada", expanded=True):
     df_input = st.data_editor(
         base_df,
         num_rows="dynamic",
-        use_container_width=True,
+        width='stretch',
         column_config={
             "Data": st.column_config.DateColumn("Mês", format="MM/YYYY"),
             "Receita": st.column_config.NumberColumn("Receita", format="R$ %.2f"),
@@ -280,4 +280,4 @@ if st.button("📥 Gerar Relatório PDF"):
 # TABELA FINAL
 # =====================================================
 with st.expander("📄 Tabela Analítica Final"):
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width='stretch')
