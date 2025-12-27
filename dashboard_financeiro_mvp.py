@@ -1,212 +1,283 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+import plotly.express as px
+from fpdf import FPDF
+import tempfile
+import re
 
-# =============================
-# CONFIG / BRANDING
-# =============================
-st.set_page_config(
-    page_title="Executive Performance Analyzer",
-    layout="wide"
-)
+# =====================================================
+# CONFIGURAÇÃO DA PÁGINA
+# =====================================================
+st.set_page_config(page_title="Análise Financeira Estratégica", layout="wide")
+st.title("📊 Análise Financeira Estratégica – Visão Líquida")
+st.caption("Diagnóstico financeiro e operacional orientado à decisão executiva.")
 
-st.title("📊 Executive Performance Analyzer")
-st.caption("Diagnóstico automático de eficiência, crescimento e risco operacional")
+# =====================================================
+# SESSÃO (persistência por usuário)
+# =====================================================
+if "historico" not in st.session_state:
+    st.session_state.historico = []
 
-# =============================
-# TEMPLATE
-# =============================
-def gerar_template(meses=6):
-    base = datetime.now() - timedelta(days=30 * meses)
-    datas = [base + timedelta(days=30*i) for i in range(meses)]
+# =====================================================
+# FUNÇÕES UTILITÁRIAS
+# =====================================================
+def plot_line_zero(df, x, y, title, y_label):
+    fig = px.line(df, x=x, y=y, markers=True, title=title)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+    fig.update_layout(xaxis_title="Período", yaxis_title=y_label)
+    return fig
 
-    np.random.seed(42)
-    atendidos = np.random.randint(200, 400, meses)
-    conversao = np.random.uniform(0.15, 0.35, meses)
-    fechados = (atendidos * conversao).astype(int)
 
-    ticket = np.random.normal(800, 120, meses)
-    receita = (fechados * ticket).astype(int)
-    despesas = (receita * np.random.uniform(0.6, 0.78, meses)).astype(int)
+def sanitize(text):
+    """Remove caracteres incompatíveis com latin-1 (FPDF)"""
+    return re.sub(r"[^\x00-\xFF]", "", text)
 
-    return pd.DataFrame({
-        "Data": pd.to_datetime(datas),
-        "Clientes Atendidos": atendidos,
-        "Clientes Fechados": fechados,
-        "Receita": receita,
-        "Despesas": despesas,
+
+def calcular_score(resultado_medio, margem, cv):
+    if resultado_medio > 0 and margem >= 20 and cv < 0.5:
+        return "A"
+    if resultado_medio > 0 and margem >= 10 and cv < 1:
+        return "B"
+    if resultado_medio > 0:
+        return "C"
+    return "D"
+
+
+def classificar_negocio(resultado_medio, crescimento, cv):
+    if resultado_medio > 0 and crescimento > 0 and cv < 1:
+        return "Em crescimento"
+    if resultado_medio > 0 and cv <= 1:
+        return "Estável"
+    return "Em risco"
+
+
+# =====================================================
+# INPUT – TABELA INTERATIVA
+# =====================================================
+st.subheader("📋 Dados Financeiros")
+
+with st.expander("📄 Tabela Interativa de Entrada", expanded=True):
+    base_df = pd.DataFrame({
+        "Data": pd.date_range("2024-01-01", periods=6, freq="MS"),
+        "Receita": [None]*6,
+        "Despesa": [None]*6,
+        "Retirada": [None]*6,
+        "Clientes_Atendidos": [None]*6,
+        "Clientes_Fechados": [None]*6,
     })
 
-def df_to_csv(df):
-    return df.to_csv(index=False).encode("utf-8")
-
-# =============================
-# SIDEBAR
-# =============================
-with st.sidebar:
-    st.header("⚙️ Dados")
-    uploaded = st.file_uploader(
-        "Upload CSV / XLSX",
-        type=["csv", "xlsx"]
+    df_input = st.data_editor(
+        base_df,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Data": st.column_config.DateColumn("Mês", format="MM/YYYY"),
+            "Receita": st.column_config.NumberColumn("Receita", format="R$ %.2f"),
+            "Despesa": st.column_config.NumberColumn("Despesa", format="R$ %.2f"),
+            "Retirada": st.column_config.NumberColumn("Retirada", format="R$ %.2f"),
+            "Clientes_Atendidos": st.column_config.NumberColumn("Atendidos"),
+            "Clientes_Fechados": st.column_config.NumberColumn("Fechados"),
+        }
     )
 
-    st.markdown("---")
-    st.subheader("📥 Template")
-    meses = st.slider("Período (meses)", 3, 24, 6)
-
-    if st.button("Baixar template"):
-        df_template = gerar_template(meses)
-        st.download_button(
-            "Download CSV",
-            df_to_csv(df_template),
-            file_name="template_performance.csv",
-            mime="text/csv"
-        )
-
-# =============================
-# LOAD DATA
-# =============================
-if not uploaded:
-    st.info("Faça upload de um arquivo ou utilize o template para começar.")
-    st.stop()
-
-df = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
-
-# =============================
-# VALIDATION (SILENCIOSA)
-# =============================
-required_cols = {
-    "Data",
-    "Clientes Atendidos",
-    "Clientes Fechados",
-    "Receita",
-    "Despesas"
-}
-
-if not required_cols.issubset(df.columns):
-    st.error("Arquivo fora do padrão esperado.")
+# =====================================================
+# VALIDAÇÃO
+# =====================================================
+df = df_input.dropna(subset=["Data", "Receita", "Despesa", "Retirada"]).copy()
+if df.empty:
+    st.info("Preencha ao menos um mês completo.")
     st.stop()
 
 df["Data"] = pd.to_datetime(df["Data"])
 df = df.sort_values("Data")
 
-# =============================
-# FILTRO DE PERÍODO
-# =============================
-min_date = df["Data"].min().date()
-max_date = df["Data"].max().date()
+# =====================================================
+# CÁLCULOS FINANCEIROS
+# =====================================================
+df["Resultado_liquido"] = df["Receita"] - df["Despesa"] - df["Retirada"]
+df["Margem_liquida_%"] = (df["Resultado_liquido"] / df["Receita"]) * 100
+df["Eficiencia_custo_%"] = ((df["Despesa"] + df["Retirada"]) / df["Receita"]) * 100
 
-with st.sidebar:
-    st.subheader("📅 Período de Análise")
+df["Media_resultado_historica"] = df["Resultado_liquido"].expanding().mean().shift(1)
+df["Crescimento_vs_media_%"] = (
+    (df["Resultado_liquido"] - df["Media_resultado_historica"])
+    / df["Media_resultado_historica"].abs()
+) * 100
 
-    periodo = st.date_input(
-        "Selecione o intervalo",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
+# =====================================================
+# MÉTRICAS GLOBAIS
+# =====================================================
+resultado_medio = df["Resultado_liquido"].mean()
+volatilidade = df["Resultado_liquido"].std()
+coef_var = volatilidade / abs(resultado_medio) if resultado_medio != 0 else np.inf
+margem_media = df["Margem_liquida_%"].mean()
+crescimento_medio = df["Crescimento_vs_media_%"].mean()
+
+score = calcular_score(resultado_medio, margem_media, coef_var)
+classificacao = classificar_negocio(resultado_medio, crescimento_medio, coef_var)
+
+# =====================================================
+# SAZONALIDADE
+# =====================================================
+df["Mes"] = df["Data"].dt.month
+sazonal = df.groupby("Mes")["Resultado_liquido"].mean()
+mes_pico = sazonal.idxmax()
+mes_fraco = sazonal.idxmin()
+
+# =====================================================
+# COMPARATIVO ÚLTIMO VS MELHOR MÊS
+# =====================================================
+melhor_mes = df.loc[df["Resultado_liquido"].idxmax()]
+ultimo_mes = df.iloc[-1]
+
+delta_melhor = (
+    (ultimo_mes["Resultado_liquido"] - melhor_mes["Resultado_liquido"])
+    / abs(melhor_mes["Resultado_liquido"])
+) * 100
+
+# =====================================================
+# KPIs
+# =====================================================
+st.subheader("📌 Indicadores Executivos")
+
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("💰 Resultado Total", f"R$ {df['Resultado_liquido'].sum():,.2f}")
+c2.metric("📆 Média Mensal", f"R$ {resultado_medio:,.2f}")
+c3.metric("📈 Margem Média", f"{margem_media:.1f}%")
+c4.metric("📊 Score Financeiro", score)
+c5.metric("🧭 Classificação", classificacao)
+
+# =====================================================
+# GRÁFICOS
+# =====================================================
+st.subheader("📈 Resultado Líquido Mensal")
+st.plotly_chart(plot_line_zero(df, "Data", "Resultado_liquido", "Resultado Líquido", "R$"), True)
+
+st.subheader("📊 Margem e Eficiência")
+fig = px.line(df, x="Data", y=["Margem_liquida_%", "Eficiencia_custo_%"], markers=True)
+fig.add_hline(y=0, line_dash="dash", line_color="gray")
+st.plotly_chart(fig, True)
+
+st.subheader("📉 Crescimento vs Média Histórica")
+st.plotly_chart(plot_line_zero(df, "Data", "Crescimento_vs_media_%", "Crescimento", "%"), True)
+
+# =====================================================
+# INSIGHTS ESTRATÉGICOS (CONSISTENTES)
+# =====================================================
+st.subheader("🧠 Insights Estratégicos")
+
+eh_lucrativo = resultado_medio > 0
+margem_alta = margem_media >= 20
+cresce = crescimento_medio > 0
+volatil_alta = coef_var > 1
+queda_recente_forte = delta_melhor <= -30
+
+insights_ui = []
+insights_pdf = []
+
+# Diagnóstico principal (único)
+if eh_lucrativo and margem_alta and volatil_alta:
+    txt = (
+        "O negócio é financeiramente viável e eficiente, porém apresenta instabilidade relevante. "
+        "A lucratividade parece concentrada em poucos períodos ou contratos."
     )
+    insights_ui.append("🟡 " + txt)
+    insights_pdf.append(txt)
 
-# Proteção contra seleção inválida
-if isinstance(periodo, tuple) and len(periodo) == 2:
-    inicio, fim = periodo
+elif eh_lucrativo and margem_alta:
+    txt = "O negócio apresenta boa saúde financeira, com lucratividade consistente e eficiência operacional."
+    insights_ui.append("🟢 " + txt)
+    insights_pdf.append(txt)
+
+elif eh_lucrativo:
+    txt = "O negócio é viável, porém com margens limitadas, exigindo maior controle de custos."
+    insights_ui.append("🟠 " + txt)
+    insights_pdf.append(txt)
+
 else:
-    inicio, fim = min_date, max_date
+    txt = "O negócio apresenta prejuízo médio, indicando inviabilidade financeira no formato atual."
+    insights_ui.append("🔴 " + txt)
+    insights_pdf.append(txt)
 
-df = df[
-    (df["Data"].dt.date >= inicio) &
-    (df["Data"].dt.date <= fim)
-]
-
-if df.empty:
-    st.warning("Nenhum dado disponível para o período selecionado.")
-    st.stop()
-
-# =============================
-# METRICS
-# =============================
-df["Ticket Médio"] = (df["Receita"] / df["Clientes Fechados"]).round(2)
-df["Lucro"] = df["Receita"] - df["Despesas"]
-df["Margem %"] = (df["Lucro"] / df["Receita"] * 100).round(2)
-df["Taxa Conversão %"] = (
-    df["Clientes Fechados"] / df["Clientes Atendidos"] * 100
-).round(2)
-
-# =============================
-# EXECUTIVE CARDS
-# =============================
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Receita Total", f"R$ {df['Receita'].sum():,.0f}")
-col2.metric("Margem Média", f"{df['Margem %'].mean():.1f}%")
-col3.metric("Conversão Média", f"{df['Taxa Conversão %'].mean():.1f}%")
-col4.metric("Ticket Médio", f"R$ {df['Ticket Médio'].mean():,.0f}")
-
-# =============================
-# VISUALIZAÇÕES
-# =============================
-st.subheader("📈 Evolução Operacional e Financeira")
-
-c1, c2 = st.columns(2)
-
-with c1:
-    st.line_chart(
-        df.set_index("Data")[["Clientes Atendidos", "Clientes Fechados"]]
-    )
-
-with c2:
-    st.line_chart(
-        df.set_index("Data")[["Receita", "Lucro"]]
-    )
-
-st.line_chart(
-    df.set_index("Data")[["Taxa Conversão %", "Margem %"]]
-)
-
-# =============================
-# INSIGHTS (MOTOR DE DECISÃO)
-# =============================
-st.subheader("🧠 Insights Executivos")
-
-crescimento = df["Receita"].pct_change().mean()
-volatilidade = df["Receita"].std() / df["Receita"].mean()
-margem_media = df["Margem %"].mean()
-
-insights = []
-
-if crescimento > 0 and volatilidade < 0.25 and margem_media > 20:
-    insights.append("Crescimento consistente com boa eficiência operacional.")
-elif crescimento > 0 and volatilidade >= 0.25:
-    insights.append(
-        "Receita em crescimento, porém com alta volatilidade. "
-        "Indica risco operacional ou dependência de poucos contratos."
-    )
+# Crescimento
+if cresce:
+    if volatil_alta:
+        txt = (
+            "Apesar do crescimento recente, o avanço ocorre de forma irregular, "
+            "indicando crescimento não estrutural."
+        )
+    else:
+        txt = "O resultado cresce de forma consistente acima da média histórica."
 else:
-    insights.append(
-        "Receita sem tendência clara de crescimento. "
-        "Atenção à conversão ou ticket médio."
+    txt = "O resultado recente está abaixo da média histórica, indicando desaceleração."
+
+insights_ui.append("📈 " + txt if cresce else "📉 " + txt)
+insights_pdf.append(txt)
+
+# Queda recente
+if queda_recente_forte:
+    txt = (
+        "O último mês apresentou desempenho muito inferior ao melhor período histórico, "
+        "o que pode indicar sazonalidade negativa ou ruptura operacional."
     )
+    insights_ui.append("⚠️ " + txt)
+    insights_pdf.append(txt)
 
-if df["Taxa Conversão %"].mean() < 20:
-    insights.append(
-        "Baixa taxa de conversão: volume atendido não está se convertendo em receita."
-    )
-
-for i in insights:
-    st.warning(i)
-
-# =============================
-# DADOS (COLAPSADO)
-# =============================
-with st.expander("📄 Ver dados carregados"):
-    st.dataframe(df)
-
-# =============================
-# CTA PRODUTO
-# =============================
-st.markdown("---")
-st.caption(
-    "Este diagnóstico oferece uma visão executiva automatizada. "
-    "Para análises personalizadas, relatórios recorrentes ou versão white-label, "
-    "este produto pode ser customizado."
+# Sazonalidade
+txt = (
+    f"Foi identificada sazonalidade: melhor desempenho médio no mês {mes_pico} "
+    f"e pior no mês {mes_fraco}."
 )
+insights_ui.append("📆 " + txt)
+insights_pdf.append(txt)
+
+# Render UI
+for i in insights_ui:
+    st.markdown(f"- {i}")
+
+# =====================================================
+# RECOMENDAÇÕES ESTRATÉGICAS
+# =====================================================
+st.subheader("🎯 Recomendações Estratégicas")
+
+if classificacao == "Em crescimento":
+    st.success("Foque em escalabilidade, previsibilidade comercial e retenção.")
+elif classificacao == "Estável":
+    st.info("Priorize eficiência operacional e redução de volatilidade.")
+else:
+    st.error("Recomenda-se revisão urgente de custos e modelo comercial.")
+
+# =====================================================
+# RELATÓRIO PDF EXECUTIVO (CLEAN)
+# =====================================================
+st.subheader("📄 Relatório Executivo")
+
+if st.button("📥 Gerar Relatório PDF"):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=10)
+
+    pdf.cell(0, 8, "Relatório Executivo de Análise Financeira", ln=True)
+    pdf.ln(3)
+
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(0, 8, "Insights Estratégicos", ln=True)
+
+    pdf.set_font("Arial", size=10)
+    for i in insights_pdf:
+        pdf.multi_cell(0, 6, f"- {sanitize(i)}")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        pdf.output(tmp.name)
+        st.download_button(
+            "⬇️ Baixar PDF",
+            open(tmp.name, "rb"),
+            file_name="relatorio_financeiro_estrategico.pdf"
+        )
+
+# =====================================================
+# TABELA FINAL
+# =====================================================
+with st.expander("📄 Tabela Analítica Final"):
+    st.dataframe(df, use_container_width=True)
